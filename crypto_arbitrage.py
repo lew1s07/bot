@@ -60,10 +60,7 @@ async def fetch_all_usdt_pairs():
 
     # Фильтрация: только если монета есть на 2+ биржах и её описание везде совпадает
     valid_coins = []
-    for coin, descs in all_coins_info.items():
-        if len(descs) >= 2 and len(set(descs.values())) == 1:
-            valid_coins.append(coin)
-
+    if len(descs) >= 2 and len(set(descs.values())) == 1:
     return valid_coins
 
 EXCHANGES = ["mexc", "gate", "bybit", "okx"]
