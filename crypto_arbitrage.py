@@ -9,7 +9,7 @@ from collections import defaultdict
 
 init(autoreset=True)
 
-EXCHANGES = ["mexc", "gate", "bybit", "okx"]
+EXCHANGES = ["mexc", "gate", "bybit", "okx", "bingx", "bitget"]
 SYMBOL_SUFFIX = "USDT"
 HISTORY_FILE = "price_history.json"
 ARBITRAGE_THRESHOLD = 3
@@ -70,7 +70,30 @@ async def fetch_all_usdt_pairs():
         except:
             pass
 
-    # Оставляем монеты, присутствующие на 2+ биржах
+        # BINGX
+        try:
+            async with session.get("https://open-api.bingx.com/openApi/swap/v2/quote/contracts") as resp:
+                data = await resp.json()
+                for s in data.get("data", []):
+                    if s["quoteAsset"] == "USDT":
+                        coin = s["baseAsset"]
+                        desc = s["symbol"]
+                        all_coins_info[coin]["bingx"] = desc
+        except:
+            pass
+
+        # BITGET
+        try:
+            async with session.get("https://api.bitget.com/api/spot/v1/public/products") as resp:
+                data = await resp.json()
+                for s in data.get("data", []):
+                    if s["quoteCoin"] == "USDT":
+                        coin = s["baseCoin"]
+                        desc = s["symbol"]
+                        all_coins_info[coin]["bitget"] = desc
+        except:
+            pass
+
     valid_coins = [coin for coin, descs in all_coins_info.items() if len(descs) >= 2]
     return valid_coins
 
@@ -80,7 +103,9 @@ def api_urls(coin):
         "mexc": f"https://api.mexc.com/api/v3/ticker/price?symbol={coin}{SYMBOL_SUFFIX}",
         "gate": f"https://api.gate.io/api/v4/spot/tickers?currency_pair={coin}_{SYMBOL_SUFFIX}",
         "bybit": f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={coin}{SYMBOL_SUFFIX}",
-        "okx": f"https://www.okx.com/api/v5/market/ticker?instId={coin}-{SYMBOL_SUFFIX}"
+        "okx": f"https://www.okx.com/api/v5/market/ticker?instId={coin}-{SYMBOL_SUFFIX}",
+        "bingx": f"https://open-api.bingx.com/openApi/spot/v1/ticker/price?symbol={coin}{SYMBOL_SUFFIX}",
+        "bitget": f"https://api.bitget.com/api/spot/v1/market/ticker?symbol={coin}{SYMBOL_SUFFIX}"
     }
 
 
@@ -96,6 +121,10 @@ async def fetch_price(session, url, exchange):
                 return float(data["result"]["list"][0]["lastPrice"])
             elif exchange == "okx":
                 return float(data["data"][0]["last"])
+            elif exchange == "bingx":
+                return float(data["data"]["price"])
+            elif exchange == "bitget":
+                return float(data["data"]["close"])
     except:
         return None
 
