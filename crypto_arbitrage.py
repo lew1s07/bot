@@ -21,11 +21,18 @@ CHAT_IDS = [1666211153, 1399216068]
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Arbitrage bot is running"}
+
+@app.get("/ping")
+async def ping():
+    return {"message": "pong"}
+
 async def fetch_all_usdt_pairs():
     all_coins_info = defaultdict(dict)
 
     async with aiohttp.ClientSession() as session:
-        # MEXC
         try:
             async with session.get("https://api.mexc.com/api/v3/exchangeInfo") as resp:
                 data = await resp.json()
@@ -37,7 +44,6 @@ async def fetch_all_usdt_pairs():
         except:
             pass
 
-        # GATE
         try:
             async with session.get("https://api.gate.io/api/v4/spot/currency_pairs") as resp:
                 data = await resp.json()
@@ -49,7 +55,6 @@ async def fetch_all_usdt_pairs():
         except:
             pass
 
-        # BYBIT
         try:
             async with session.get("https://api.bybit.com/v5/market/instruments-info?category=spot") as resp:
                 data = await resp.json()
@@ -61,7 +66,6 @@ async def fetch_all_usdt_pairs():
         except:
             pass
 
-        # OKX
         try:
             async with session.get("https://www.okx.com/api/v5/public/instruments?instType=SPOT") as resp:
                 data = await resp.json()
@@ -73,7 +77,6 @@ async def fetch_all_usdt_pairs():
         except:
             pass
 
-    # Оставляем монеты, присутствующие на 2+ биржах
     valid_coins = [coin for coin, descs in all_coins_info.items() if len(descs) >= 2]
     return valid_coins
 
@@ -212,24 +215,21 @@ async def compare_prices(coins):
 
 async def main_loop():
     coins = await fetch_all_usdt_pairs()
-    print(f"🔎 Найдено валидных монет: {len(coins)} — {coins}")
+    if not coins:
+        print("❌ Не найдено монет для арбитража. Завершение.")
+        return
+
+    print(f"🔁 Запуск основного цикла... Всего монет: {len(coins)}")
     while True:
         try:
             await compare_prices(coins)
         except Exception as e:
-            print(f"{Fore.YELLOW}⚠️ Ошибка: {e}{Style.RESET_ALL}")
+            print(f"⚠️ Ошибка в основном цикле: {e}")
         await asyncio.sleep(10)
-
 
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(main_loop())
-
-
-@app.get("/")
-async def root():
-    return {"status": "Crypto Arbitrage Bot is running ✅"}
-
 
 if __name__ == "__main__":
     uvicorn.run("crypto_arbitrage:app", host="0.0.0.0", port=8000)
