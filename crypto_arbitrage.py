@@ -199,7 +199,7 @@ async def compare_prices():
 
 async def main():
     global COINS
-    COINS = await fetch_all_usdt_pairs()
+    COINS = ["BTC", "ETH", "SOL"]
     print(f"🔎 Найдено валидных монет: {len(COINS)}")
 
     while True:
