@@ -44,26 +44,23 @@ async def fetch_all_usdt_pairs():
                         all_coins_info[coin]["mexc"] = s["symbol"]
         except Exception as e:
             print("MEXC error:", e)
-
-        try:
-            async with session.get("https://api.gate.io/api/v4/spot/currency_pairs") as resp:
-                data = await resp.json()
-                for p in data:
-                    if p["quote"] == "USDT":
-                        coin = p["base"].upper()
-                        all_coins_info[coin]["gate"] = p["id"]  # нижний регистр, например btc_usdt
-        except Exception as e:
-            print("Gate error:", e)
+            
+conn = aiohttp.TCPConnector(ssl=False)  # отключаем проверку SSL (временно!)
+headers = {
+    "User-Agent": "Mozilla/5.0"
+}
+        async with aiohttp.ClientSession(connector=conn, headers=headers) as session:
+    try:
+        async with session.get("https://api.gate.io/api/v4/spot/currency_pairs") as resp:
+            data = await resp.json()
+    except Exception as e:
+        print(f"Gate error: {e}")
 
         try:
             async with session.get("https://api.bybit.com/v5/market/instruments-info?category=spot") as resp:
-                data = await resp.json()
-                for s in data["result"]["list"]:
-                    if s["quoteCoin"] == "USDT":
-                        coin = s["baseCoin"]
-                        all_coins_info[coin]["bybit"] = s["symbol"]
-        except Exception as e:
-            print("Bybit error:", e)
+            data = await resp.json()
+    except Exception as e:
+        print(f"Bybit error: {e}")
 
         try:
             async with session.get("https://www.okx.com/api/v5/public/instruments?instType=SPOT") as resp:
