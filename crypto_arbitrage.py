@@ -1,13 +1,12 @@
 import aiohttp
 import asyncio
 import json
-import time
-from datetime import datetime
-from colorama import Fore, Style, init
 import os
+from datetime import datetime
 from collections import defaultdict
 from fastapi import FastAPI
 import uvicorn
+from colorama import Fore, Style, init
 
 init(autoreset=True)
 
@@ -20,7 +19,6 @@ TELEGRAM_TOKEN = "7827467641:AAFdq_Z9uQNPjbOD6fAQnXUp5lX1xInnmkY"
 CHAT_IDS = [1666211153, 1399216068]
 
 app = FastAPI()
-all_coins_info = {}  # глобальное хранилище символов
 
 @app.get("/")
 async def root():
@@ -31,63 +29,67 @@ async def ping():
     return {"message": "pong"}
 
 async def fetch_all_usdt_pairs():
-    global all_coins_info
     all_coins_info = defaultdict(dict)
+    conn = aiohttp.TCPConnector(ssl=False)
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=conn, headers=headers) as session:
         try:
             async with session.get("https://api.mexc.com/api/v3/exchangeInfo") as resp:
                 data = await resp.json()
                 for s in data["symbols"]:
                     if s["quoteAsset"] == "USDT":
                         coin = s["baseAsset"]
-                        all_coins_info[coin]["mexc"] = s["symbol"]
+                        desc = s["symbol"]
+                        all_coins_info[coin]["mexc"] = desc
         except Exception as e:
-            print("MEXC error:", e)
-            
-conn = aiohttp.TCPConnector(ssl=False)  # отключаем проверку SSL (временно!)
-headers = {
-    "User-Agent": "Mozilla/5.0"
-}
-        async with aiohttp.ClientSession(connector=conn, headers=headers) as session:
-    try:
-        async with session.get("https://api.gate.io/api/v4/spot/currency_pairs") as resp:
-            data = await resp.json()
-    except Exception as e:
-        print(f"Gate error: {e}")
+            print(f"MEXC error: {e}")
+
+        try:
+            async with session.get("https://api.gate.io/api/v4/spot/currency_pairs") as resp:
+                data = await resp.json()
+                for p in data:
+                    if p["quote"] == "USDT":
+                        coin = p["id"].split("_")[0].upper()
+                        desc = p.get("label", p["id"])
+                        all_coins_info[coin]["gate"] = desc
+        except Exception as e:
+            print(f"Gate.io error: {e}")
 
         try:
             async with session.get("https://api.bybit.com/v5/market/instruments-info?category=spot") as resp:
-            data = await resp.json()
-    except Exception as e:
-        print(f"Bybit error: {e}")
+                data = await resp.json()
+                for s in data["result"]["list"]:
+                    if s["symbol"].endswith("USDT"):
+                        coin = s["baseCoin"]
+                        desc = s["symbol"]
+                        all_coins_info[coin]["bybit"] = desc
+        except Exception as e:
+            print(f"Bybit error: {e}")
 
         try:
             async with session.get("https://www.okx.com/api/v5/public/instruments?instType=SPOT") as resp:
                 data = await resp.json()
                 for s in data["data"]:
-                    if s["quoteCcy"] == "USDT":
+                    if s["instId"].endswith("USDT"):
                         coin = s["baseCcy"]
-                        all_coins_info[coin]["okx"] = s["instId"]
+                        desc = s["instId"]
+                        all_coins_info[coin]["okx"] = desc
         except Exception as e:
-            print("OKX error:", e)
+            print(f"OKX error: {e}")
 
     valid_coins = [coin for coin, descs in all_coins_info.items() if len(descs) >= 2]
-    print(f"✅ Найдено {len(valid_coins)} монет на 2+ биржах")
     return valid_coins
 
+
 def api_urls(coin):
-    descs = all_coins_info.get(coin, {})
-    urls = {}
-    if "mexc" in descs:
-        urls["mexc"] = f"https://api.mexc.com/api/v3/ticker/price?symbol={descs['mexc']}"
-    if "gate" in descs:
-        urls["gate"] = f"https://api.gate.io/api/v4/spot/tickers?currency_pair={descs['gate']}"
-    if "bybit" in descs:
-        urls["bybit"] = f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={descs['bybit']}"
-    if "okx" in descs:
-        urls["okx"] = f"https://www.okx.com/api/v5/market/ticker?instId={descs['okx']}"
-    return urls
+    return {
+        "mexc": f"https://api.mexc.com/api/v3/ticker/price?symbol={coin}{SYMBOL_SUFFIX}",
+        "gate": f"https://api.gate.io/api/v4/spot/tickers?currency_pair={coin}_{SYMBOL_SUFFIX}",
+        "bybit": f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={coin}{SYMBOL_SUFFIX}",
+        "okx": f"https://www.okx.com/api/v5/market/ticker?instId={coin}-{SYMBOL_SUFFIX}"
+    }
+
 
 async def fetch_price(session, url, exchange):
     try:
@@ -98,13 +100,12 @@ async def fetch_price(session, url, exchange):
             elif exchange == "gate":
                 return float(data[0]["last"])
             elif exchange == "bybit":
-                if data["result"]["list"]:
-                    return float(data["result"]["list"][0]["lastPrice"])
+                return float(data["result"]["list"][0]["lastPrice"])
             elif exchange == "okx":
                 return float(data["data"][0]["last"])
-    except Exception as e:
-        print(f"⚠️ Ошибка получения цены от {exchange}: {e}")
-    return None
+    except:
+        return None
+
 
 async def send_telegram_message(text):
     async with aiohttp.ClientSession() as session:
@@ -112,46 +113,21 @@ async def send_telegram_message(text):
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             payload = {"chat_id": chat_id, "text": text}
             try:
-                async with session.post(url, data=payload) as resp:
-                    if resp.status == 200:
-                        print(f"{Fore.GREEN}✅ Telegram -> {chat_id}{Style.RESET_ALL}")
-                    else:
-                        print(f"{Fore.RED}❌ Telegram ошибка: {resp.status}{Style.RESET_ALL}")
-            except Exception as e:
-                print(f"{Fore.RED}❌ Telegram исключение: {e}{Style.RESET_ALL}")
+                await session.post(url, data=payload)
+            except:
+                pass
 
-async def is_token_transferable(coin):
-    unavailable = []
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(f"https://www.okx.com/api/v5/asset/currencies?ccy={coin}") as r:
-                data = await r.json()
-                if data.get("data"):
-                    d = data["data"][0]
-                    if d.get("canDep") != "true" or d.get("canWd") != "true":
-                        unavailable.append("okx")
-        except:
-            pass
-
-        try:
-            async with session.get(f"https://api.bybit.com/v5/asset/coin/query-info?coin={coin}") as r:
-                data = await r.json()
-                if data.get("result"):
-                    d = data["result"]["rows"][0]
-                    if not d.get("withdrawable") or not d.get("depositable"):
-                        unavailable.append("bybit")
-        except:
-            pass
-
-    return unavailable
 
 async def compare_prices(coins):
-    async with aiohttp.ClientSession() as session:
+    conn = aiohttp.TCPConnector(ssl=False)
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    async with aiohttp.ClientSession(connector=conn, headers=headers) as session:
         for coin in coins:
             urls = api_urls(coin)
-            tasks = [fetch_price(session, urls[ex], ex) for ex in urls]
+            tasks = [fetch_price(session, urls[ex], ex) for ex in EXCHANGES]
             prices = await asyncio.gather(*tasks)
-            price_dict = {ex: p for ex, p in zip(urls.keys(), prices) if p is not None}
+            price_dict = {ex: p for ex, p in zip(EXCHANGES, prices) if p is not None}
 
             if len(price_dict) < 2:
                 continue
@@ -174,13 +150,8 @@ async def compare_prices(coins):
             msg = (
                 f"[{timestamp}] {coin}/USDT\n"
                 + "\n".join([f"- {ex.capitalize()}: ${price:,.6f}" for ex, price in price_dict.items()])
-                + f"\n🔹 Арбитраж: купить на {min_ex}, продать на {max_ex} "
-                f"(+{percent_diff:.2f}% / +${abs_diff:.4f})"
+                + f"\n🔹 Арбитраж: купить на {min_ex}, продать на {max_ex} (+{percent_diff:.2f}% / +${abs_diff:.4f})"
             )
-
-            unavailable = await is_token_transferable(coin)
-            if unavailable:
-                msg += f"\n⚠️ Ввод/вывод приостановлен на: {', '.join(unavailable)}"
 
             print(f"{Fore.CYAN}{msg}{Style.RESET_ALL}\n")
 
@@ -204,11 +175,11 @@ async def compare_prices(coins):
                         "sell": max_ex,
                         "percent_diff": percent_diff,
                         "abs_diff": abs_diff
-                    },
-                    "unavailable": unavailable
+                    }
                 })
                 f.seek(0)
                 json.dump(history, f, indent=2)
+
 
 async def main_loop():
     coins = await fetch_all_usdt_pairs()
@@ -229,4 +200,4 @@ async def startup_event():
     asyncio.create_task(main_loop())
 
 if __name__ == "__main__":
-    uvicorn.run("crypto_arbitrage:app", host="0.0.0.0", port=8000)
+    uvicorn.run("arbitrage_bot_fixed:app", host="0.0.0.0", port=8000, reload=True)
