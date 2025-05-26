@@ -2,6 +2,9 @@ import aiohttp
 import asyncio
 import json
 import os
+import time
+import requests
+import threading
 from datetime import datetime
 from collections import defaultdict
 from fastapi import FastAPI
@@ -27,6 +30,18 @@ async def root():
 @app.get("/ping")
 async def ping():
     return {"message": "pong"}
+
+# 🔁 ПИНГ Render-а для предотвращения сна
+def keep_alive_ping():
+    while True:
+        try:
+            requests.get("https://your-app-name.onrender.com/ping")  # <-- ЗАМЕНИ на свой Render URL!
+            print("✅ Ping sent to keep app alive.")
+        except Exception as e:
+            print("❌ Ping error:", e)
+        time.sleep(600)  # каждые 10 минут
+
+threading.Thread(target=keep_alive_ping, daemon=True).start()
 
 async def fetch_all_usdt_pairs():
     all_coins_info = defaultdict(dict)
